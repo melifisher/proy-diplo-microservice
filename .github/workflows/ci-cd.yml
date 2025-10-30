@@ -1,79 +1,127 @@
+# Informacion basica del workflow
+# Nombre del workflow
 name: CI/CD - Microservicio Node.js en DOCKER desplegado en EC2
 
+# Define cuando se ejecuta este proceso automaticamente
 on:
+  # Se ejecuta cuando se hace un push a la branch main
   push:
     branches: ["main"]
+  # Se ejecuta cuando se hace un pull request a la branch main
   pull_request:
     branches: ["main"]
 
+# Variables globales -> Se pueden usar en todos los jobs
 env:
+  # Nombre de la imagen en Docker Hub
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/demo-microservice-lab
+  # Puerto de la aplicacion -> Si no se define, se usa el 3000
   APP_PORT: ${{ secrets.APP_PORT || 3000 }}
 
+# Trabajo de Integracion Continua (CI) -> Build y test
+# Define todos los trabajos que va a hacer
 jobs:
   ci:
     name: Integracion continua (build y test)
+    # Se ejecuta en una maquina virtual de Ubuntu
     runs-on: ubuntu-latest
+    # Configuraciones por defecto para este trabajo
     defaults:
+      # Se ejecuta en el directorio app
       run:
+        # Todos los comandos se ejecutan dentro de la carpeta app
         working-directory: app
 
+    # Pasos del trabajo CI 
     steps:
       - name: Obtener codigo
+        # Usa una accion predefinida para descargar el codigo desde GitHub
         uses: actions/checkout@v4
 
       - name: Configuracion Node.js
+        # Usa accion predefinida para configurar Node.js
         uses: actions/setup-node@v4
+        # Configuracion especifica para este paso
         with:
+          # Usa la version 18 de Node.js
           node-version: 18
 
+      # Instalar dependencias y ejecutar pruebas
       - name: Instalar dependencias
         run: npm install
 
       - name: Ejecutar las pruebas
         run: npm test
 
+      # Login y construcción de Docker
       - name: Iniciar sesion en Docker Hub
+        # echo "${{ secrets.DOCKERHUB_TOKEN }}" -> Toma la llave secreta
+        # | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin 
+        # -> Usa la llave secreta para iniciar sesion en Docker Hub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Construir imagen (latest)
+        # Construye la imagen con el nombre de la imagen y la version latest
         run: docker build -t $IMAGE_NAME:latest .
 
       - name: Publicar la imagen (latest)
+        # Comando para subir la imagen a Docker Hub
         run: docker push $IMAGE_NAME:latest
 
+  # Trabajo de Despliegue (CD)
+  # Define todos los trabajos que va a hacer
   cd:
     name: Entrega y despliegue en EC2
+    # Se ejecuta en una maquina virtual de Ubuntu
     runs-on: ubuntu-latest
+    # Se ejecuta despues de la integracion continua
     needs: [ci]
 
-    steps: 
+    # Configurar SSH
+    steps:
       - name: Instalar cliente SSH
+        # Actualiza y Instalad el cliente SSH
         run: sudo apt-get update && sudo apt-get install -y openssh-client
 
       - name: Cargar clave privada en ssh-agent
+        # Usa accion para manejar las llaves SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
+          # Usa la llave privada SSH para autenticarse en el servidor
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Ver fingerprint de la clave cargada en el agent
+      # Verificaciones de SSH -> Esta cargada la llave correctamente ?
+      - name: Verificar la clave cargada en el agent
         run: |
+          # Configuracion para parar si hay errrores
           set -euo pipefail
+          # Muestra la "huella digital" de la llave SSH
           ssh-add -l -E sha256
 
+      # Registra el servidor como confiable
       - name: Registrar known_hosts
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
           set -euo pipefail
+          # Crea carpeta SSH si no existe
           mkdir -p ~/.ssh
+          # ssh-keyscan -T 10 -H "$EC2_HOST" -> Obtiene la identificacion del servidor
+          # >> ~/.ssh/known_hosts -> Agrega la identificacion al archivo known_hosts
+          # 2>/dev/null -> Redirige los errores a /dev/null
+          # || true -> Continua el proceso aunque haya un error
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Probar conexión SSH (solo publickey, usando agent)
         env:
+          # Define variable con la direccion del servidor
           HOST: ${{ secrets.EC2_HOST }}
         run: |
           set -euo pipefail
+          # ssh -o PreferredAuthentications=publickey -> Se conecta solo con la llave publica
+          # -o PubkeyAuthentication=yes -> Permite la autenticacion con la llave publica
+          # ec2-user@"$HOST" -> Usuario y direccion del servidor
+          # 'whoami && uname -a' -> Comando para verificar la conexion
           ssh -o PreferredAuthentications=publickey \
               -o PubkeyAuthentication=yes \
               ec2-user@"$HOST" 'whoami && uname -a'
@@ -86,20 +134,50 @@ jobs:
         run: |
           set -euo pipefail
           # Pasar variables al shell remoto antes de ejecutar el script
+
+          # ssh -o IdentitiesOnly=no -o StrictHostKeyChecking=yes -> Permite la autenticacion con la llave publica
+          # ec2-user@"$HOST" -> Usuario y direccion del servidor
+          # "IMAGE='$IMAGE' APP_PORT='$APP_PORT' bash -s" -> Variables para el script
+          # << 'EOF' -> Inicia el script
           ssh -o IdentitiesOnly=no -o StrictHostKeyChecking=yes \
               ec2-user@"$HOST" "IMAGE='$IMAGE' APP_PORT='$APP_PORT' bash -s" << 'EOF'
+
+          # set -euxo pipefail -> Configuracion para parar si hay errores
           set -euxo pipefail
+          # if command -v systemctl >/dev/null 2>&1; then -> Verifica si systemctl esta instalado
+          # sudo systemctl start docker || true -> Inicia Docker
+          # else -> Si no esta instalado, inicia Docker con service
           if command -v systemctl >/dev/null 2>&1; then
             sudo systemctl start docker || true
           else
             sudo service docker start || true
           fi
 
+          # docker network inspect appnet -> Verifica si la red appnet existe
+          # >/dev/null 2>&1 -> Redirige los errores a /dev/null
+          # || docker network create appnet -> Si no existe, crea la red
           docker network inspect appnet >/dev/null 2>&1 || docker network create appnet
+
+          # docker ps -q --filter "name=demo-microservice-lab" -> Verifica si el contenedor demo-microservice-lab existe
+          # | grep -q . -> Verifica si el contenedor existe
+          # && docker stop demo-microservice-lab -> Si existe, para el contenedor
+          # || true -> Continua el proceso aunque haya un error
           docker ps -q --filter "name=demo-microservice-lab" | grep -q . && docker stop demo-microservice-lab || true
+          
+          # docker ps -aq --filter "name=demo-microservice-lab" -> Verifica si el contenedor demo-microservice-lab existe
+          # | grep -q . -> Verifica si el contenedor existe
+          # && docker rm demo-microservice-lab -> Si existe, elimina el contenedor
+          # || true -> Continua el proceso aunque haya un error
           docker ps -aq --filter "name=demo-microservice-lab" | grep -q . && docker rm demo-microservice-lab || true
 
+
+          # docker pull "$IMAGE" -> Descarga la imagen desde Docker Hub
+          # "$IMAGE" -> Nombre de la imagen
           docker pull "$IMAGE"
+          # docker run -d --name demo-microservice-lab --restart unless-stopped -> Crea el contenedor
+          # --network appnet -> Usa la red appnet
+          # -p 80:"$APP_PORT" -> Mapea el puerto 80 del contenedor al puerto $APP_PORT del host
           docker run -d --name demo-microservice-lab --restart unless-stopped \
             --network appnet -p 80:"$APP_PORT" "$IMAGE"
+          # EOF -> Fin del script
           EOF

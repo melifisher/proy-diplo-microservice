@@ -1,9 +1,9 @@
-import express from "express";
+import express from 'express';
 
 const app = express();
 
-app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "Hola Microservicio 2" });
+app.get('/hola', (req, res) => {
+    res.json({ mensaje: 'Hola Mundo' });
 });
 
 export default app;
