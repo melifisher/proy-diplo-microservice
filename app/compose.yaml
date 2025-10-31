@@ -4,7 +4,7 @@ services:
   # Servicio de la aplicación Node.js
   app:
     build: .
-    ports:
+    ports: 
       - "3000:3000"
     environment:
       - APP_PORT=3000
