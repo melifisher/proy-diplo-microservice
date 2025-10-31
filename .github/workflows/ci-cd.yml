@@ -31,7 +31,7 @@ jobs:
         run: npm install
 
       - name: Ejecutar las pruebas
-        run: npm test
+        run: NODE_ENV=test npm test
 
       - name: Iniciar sesion en Docker Hub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
