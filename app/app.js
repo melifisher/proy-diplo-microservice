@@ -6,7 +6,7 @@ app.use(express.json());
 
 // Configurar cliente Redis
 const redisClient = createClient({
-    url: process.env.REDIS_URL || 'redis://redis:6379'
+    url: `redis://${process.env.REDIS_HOST || "redis"}:${process.env.REDIS_PORT || 6379}`
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
@@ -14,13 +14,16 @@ redisClient.on('connect', () => console.log('Conectado a Redis'));
 
 // Conectar a Redis (manejo asíncrono)
 let redisConnected = false;
-redisClient.connect()
-    .then(() => {
-        redisConnected = true;
-    })
-    .catch((err) => {
-        console.error('Error conectando a Redis:', err);
-    });
+
+if (process.env.NODE_ENV !== 'test') {
+    redisClient.connect()
+        .then(() => {
+            redisConnected = true;
+        })
+        .catch((err) => {
+            console.error('Error conectando a Redis:', err);
+        });
+}
 
 app.get('/hola', (req, res) => {
     res.json({ mensaje: 'Hola Mundo' });
