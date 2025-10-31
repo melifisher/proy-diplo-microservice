@@ -1,0 +1,35 @@
+name: Docker Compose configuration for Node.js app with Redis
+
+services:
+  # Servicio de la aplicación Node.js
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - APP_PORT=3000
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - appnet
+    restart: unless-stopped
+
+  # Servicio de Redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - appnet
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  redis-data:
